@@ -1,0 +1,642 @@
+diff --git a/client/src/constants/tripTabs.ts b/client/src/constants/tripTabs.ts
+index 62e734fc6..80c1360d0 100644
+--- a/client/src/constants/tripTabs.ts
++++ b/client/src/constants/tripTabs.ts
+@@ -17,6 +17,7 @@ export const TRIP_TAB_IDS = [
+   'buchungen',
+   'listen',
+   'finanzplan',
++  'budgetboard',
+   'dateien',
+   'collab',
+ ] as const
+@@ -36,6 +37,7 @@ export const TRIP_TAB_LABEL_KEYS: Record<TripTabId, string> = {
+   buchungen: 'trip.tabs.reservations',
+   listen: 'trip.tabs.lists',
+   finanzplan: 'trip.tabs.budget',
++  budgetboard: 'trip.tabs.budgetboard',
+   dateien: 'trip.tabs.files',
+   collab: 'admin.addons.catalog.collab.name',
+ }
+diff --git a/client/src/pages/TripPlannerPage.tsx b/client/src/pages/TripPlannerPage.tsx
+index a9455f057..372628807 100644
+--- a/client/src/pages/TripPlannerPage.tsx
++++ b/client/src/pages/TripPlannerPage.tsx
+@@ -65,6 +65,7 @@ const PackingListPanel = lazyWithRetry(() => import('../components/Packing/Packi
+ const TodoListPanel = lazyWithRetry(() => import('../components/Todo/TodoListPanel'))
+ const FileManager = lazyWithRetry(() => import('../components/Files/FileManager'))
+ const CostsPanel = lazyWithRetry(() => import('../components/Budget/CostsPanel'))
++const BudgetBoard = lazyWithRetry(() => import('../components/Budget/BudgetBoard'))
+ // Named export, so it needs the extra hop. Importing it statically would keep the
+ // whole CostsPanel module in the page chunk and undo the split above.
+ const ExpenseModal = lazyWithRetry(() =>
+@@ -1024,6 +1025,14 @@ function TripPlannerPageDesktop(): React.ReactElement | null {
+           </div>
+         )}
+ 
++        {activeTab === 'budgetboard' && (
++          <div style={{ height: '100%', overflowY: 'auto', overscrollBehavior: 'contain', width: '100%', paddingBottom: 'var(--bottom-nav-h)' }}>
++            <LazyPanel id="budgetboard">
++              <BudgetBoard tripId={tripId} tripMembers={tripMembers} />
++            </LazyPanel>
++          </div>
++        )}
++
+         {activeTab === 'dateien' && (
+           <div style={{ height: '100%', overflow: 'hidden', overscrollBehavior: 'contain', paddingBottom: 'var(--bottom-nav-h)' }}>
+             <LazyPanel id="dateien">
+diff --git a/client/src/pages/tripPlanner/useTripPlanner.ts b/client/src/pages/tripPlanner/useTripPlanner.ts
+index 5128a747a..c89866aa6 100644
+--- a/client/src/pages/tripPlanner/useTripPlanner.ts
++++ b/client/src/pages/tripPlanner/useTripPlanner.ts
+@@ -9,7 +9,7 @@ import { useSettingsStore } from '../../store/settingsStore'
+ import { dayColor } from '../../components/Roadtrip/dayColors'
+ import { getCached, fetchPhoto } from '../../services/photoService'
+ import { useToast } from '../../components/shared/Toast'
+-import { Map, Ticket, PackageCheck, Wallet, FolderOpen, Users, Train, Route } from 'lucide-react'
++import { Map, Ticket, PackageCheck, Wallet, FolderOpen, Users, Train, Route, LayoutDashboard } from 'lucide-react'
+ import { resolvePluginIcon } from '../../components/shared/PluginIcon'
+ import { useTranslation, translateApiError } from '../../i18n'
+ import { addonsApi, accommodationsApi, authApi, tripsApi, assignmentsApi, healthApi, airtrailApi, mapsApi, placesApi } from '../../api/client'
+@@ -242,6 +242,7 @@ export function useTripPlanner() {
+     ...(enabledAddons.roadtrip && isMobile ? [{ id: 'roadtrip', label: t(TRIP_TAB_LABEL_KEYS.roadtrip), icon: Route }] : []),
+     ...(enabledAddons.packing ? [{ id: 'listen', label: t(TRIP_TAB_LABEL_KEYS.listen), shortLabel: t('trip.tabs.listsShort'), icon: PackageCheck }] : []),
+     ...(enabledAddons.budget ? [{ id: 'finanzplan', label: t(TRIP_TAB_LABEL_KEYS.finanzplan), icon: Wallet }] : []),
++    ...(enabledAddons.budget ? [{ id: 'budgetboard', label: t(TRIP_TAB_LABEL_KEYS.budgetboard), icon: LayoutDashboard }] : []),
+     ...(enabledAddons.documents ? [{ id: 'dateien', label: t(TRIP_TAB_LABEL_KEYS.dateien), icon: FolderOpen }] : []),
+     ...(enabledAddons.collab ? [{ id: 'collab', label: t(TRIP_TAB_LABEL_KEYS.collab), icon: Users }] : []),
+   ].filter(tab => tab.id === 'plan' || !replacedTabs.has(tab.id))
+@@ -284,7 +285,7 @@ export function useTripPlanner() {
+     const tabId = replacedTabs.has(rawTabId) ? 'plan' : rawTabId
+     setActiveTab(tabId)
+     sessionStorage.setItem(`trip-tab-${tripId}`, tabId)
+-    if (tabId === 'finanzplan') tripActions.loadBudgetItems?.(tripId)
++    if (tabId === 'finanzplan' || tabId === 'budgetboard') tripActions.loadBudgetItems?.(tripId)
+     if (tabId === 'dateien' && (!files || files.length === 0)) tripActions.loadFiles?.(tripId)
+   }
+ 
+@@ -297,7 +298,7 @@ export function useTripPlanner() {
+     if (!tripId || startTabSettled.current === tripId) return
+     startTabSettled.current = tripId
+     sessionStorage.setItem(`trip-tab-${tripId}`, activeTab)
+-    if (activeTab === 'finanzplan') tripActions.loadBudgetItems?.(tripId)
++    if (activeTab === 'finanzplan' || activeTab === 'budgetboard') tripActions.loadBudgetItems?.(tripId)
+     if (activeTab === 'dateien' && (!files || files.length === 0)) tripActions.loadFiles?.(tripId)
+   }, [tripId])
+   const {
+diff --git a/server/public/.gitkeep b/server/public/.gitkeep
+deleted file mode 100644
+index e69de29bb..000000000
+diff --git a/shared/src/i18n/en/budget.ts b/shared/src/i18n/en/budget.ts
+index 8d277c37a..f9b77c3c3 100644
+--- a/shared/src/i18n/en/budget.ts
++++ b/shared/src/i18n/en/budget.ts
+@@ -158,6 +158,30 @@ const budget: TranslationStrings = {
+   'costs.deleteReceipt': 'Remove receipt',
+   'costs.viewReceipt': 'View receipt',
+   'costs.receiptLeftBehind': 'Save failed, and {count} uploaded receipts are still there. Remove them in the Files tab.',
++  'budgetBoard.title': 'Budget Board',
++  'budgetBoard.totalSpent': 'Total Spent',
++  'budgetBoard.byCategory': 'Spending by Category',
++  'budgetBoard.dailyTrend': 'Daily Spending Trend',
++  'budgetBoard.memberSplit': 'Member Split & Settlement',
++  'budgetBoard.noExpenses': 'No expenses yet. Add some in the Costs tab to see the board.',
++  'budgetBoard.category': 'Category',
++  'budgetBoard.amount': 'Amount',
++  'budgetBoard.percent': 'Share',
++  'budgetBoard.grandTotal': 'Grand Total',
++  'budgetBoard.dailyAvg': 'Daily Average',
++  'budgetBoard.peakDay': 'Peak Day',
++  'budgetBoard.date': 'Date',
++  'budgetBoard.spent': 'Spent',
++  'budgetBoard.noDate': 'No date',
++  'budgetBoard.perPerson': 'Per Person',
++  'budgetBoard.balance': 'Balance',
++  'budgetBoard.owes': 'owes',
++  'budgetBoard.to': 'to',
++  'budgetBoard.settled': 'All settled up',
++  'budgetBoard.noMembers': 'Only one member — no split needed.',
++  'budgetBoard.progress': 'of total',
++  'budgetBoard.items': 'items',
++  'budgetBoard.viewAll': 'View all in Costs',
+ };
+ 
+ export default budget;
+diff --git a/shared/src/i18n/en/trip.ts b/shared/src/i18n/en/trip.ts
+index 3839481fa..5ef9c0e1c 100644
+--- a/shared/src/i18n/en/trip.ts
++++ b/shared/src/i18n/en/trip.ts
+@@ -10,6 +10,7 @@ const trip: TranslationStrings = {
+   'trip.tabs.lists': 'Lists',
+   'trip.tabs.listsShort': 'Lists',
+   'trip.tabs.budget': 'Costs',
++  'trip.tabs.budgetboard': 'Board',
+   'trip.tabs.files': 'Files',
+   'trip.loading': 'Loading trip...',
+   'trip.loadingPhotos': 'Loading place photos...',
+diff --git a/shared/src/i18n/zh/budget.ts b/shared/src/i18n/zh/budget.ts
+index aea929eef..191938653 100644
+--- a/shared/src/i18n/zh/budget.ts
++++ b/shared/src/i18n/zh/budget.ts
+@@ -157,5 +157,29 @@ const budget: TranslationStrings = {
+   'costs.deleteReceipt': '删除收据',
+   'costs.viewReceipt': '查看收据',
+   'costs.receiptLeftBehind': '保存失败，还有 {count} 个已上传的收据。请在“文件”标签页中删除。',
++  'budgetBoard.title': '预算看板',
++  'budgetBoard.totalSpent': '总支出',
++  'budgetBoard.byCategory': '分类支出',
++  'budgetBoard.dailyTrend': '每日支出趋势',
++  'budgetBoard.memberSplit': '成员分摊与结算',
++  'budgetBoard.noExpenses': '暂无支出。在费用页签添加支出后看板将显示数据。',
++  'budgetBoard.category': '分类',
++  'budgetBoard.amount': '金额',
++  'budgetBoard.percent': '占比',
++  'budgetBoard.grandTotal': '总计',
++  'budgetBoard.dailyAvg': '日均',
++  'budgetBoard.peakDay': '峰值日',
++  'budgetBoard.date': '日期',
++  'budgetBoard.spent': '支出',
++  'budgetBoard.noDate': '无日期',
++  'budgetBoard.perPerson': '人均',
++  'budgetBoard.balance': '余额',
++  'budgetBoard.owes': '应付',
++  'budgetBoard.to': '给',
++  'budgetBoard.settled': '已结清',
++  'budgetBoard.noMembers': '仅一名成员——无需分摊。',
++  'budgetBoard.progress': '占总计',
++  'budgetBoard.items': '笔',
++  'budgetBoard.viewAll': '在费用页查看全部',
+ };
+ export default budget;
+diff --git a/shared/src/i18n/zh/trip.ts b/shared/src/i18n/zh/trip.ts
+index 072a44c55..77383eb0e 100644
+--- a/shared/src/i18n/zh/trip.ts
++++ b/shared/src/i18n/zh/trip.ts
+@@ -10,6 +10,7 @@ const trip: TranslationStrings = {
+   'trip.tabs.lists': '列表',
+   'trip.tabs.listsShort': '列表',
+   'trip.tabs.budget': '费用',
++  'trip.tabs.budgetboard': '看板',
+   'trip.tabs.files': '文件',
+   'trip.loading': '加载旅行中...',
+   'trip.loadingPhotos': '正在加载地点照片...',
+
+--- /dev/null
++++ b/client/src/components/Budget/BudgetBoard.tsx
++++ b/client/src/components/Budget/BudgetBoard.tsx
+@@ -0,0 +1,455 @@
++/**
++ * Budget Board — a dashboard overview of trip expenses.
++ *
++ * Four sections, all rendered with pure SVG/CSS (no chart library):
++ *   1. Spending by category — progress bars with amounts and percentages
++ *   2. Category pie chart — conic-gradient donut + legend
++ *   3. Daily spending trend — SVG bar chart
++ *   4. Member split & settlement — per-person summary + settlement flows
++ *
++ * Data comes entirely from the existing budget domain:
++ *   - budgetItems from useTripStore (same source as CostsPanel)
++ *   - perPersonSummary and settlement from budgetApi (existing endpoints)
++ *
++ * No new DB tables, no new backend endpoints.
++ */
++
++import { useState, useEffect, useMemo } from 'react'
++import { LayoutDashboard, Wallet, TrendingUp, Users, ArrowRight } from 'lucide-react'
++import { useTripStore } from '../../store/tripStore'
++import { useTranslation } from '../../i18n'
++import { budgetApi } from '../../api/client'
++import { COST_CAT_META } from './costsCategories'
++import { PIE_COLORS, SYMBOLS } from './BudgetPanel.constants'
++import type { BudgetItem } from '../../types'
++import type { TripMember } from './BudgetPanelMemberChips'
++import { currencyDecimals } from '../../utils/formatters'
++
++// ── Types ────────────────────────────────────────────────────────────────────
++
++interface PerPersonSummary {
++  user_id: number
++  username: string
++  avatar_url: string | null
++  paid: number
++  share: number
++  balance: number
++}
++
++interface SettlementFlow {
++  from: { user_id: number; username: string; avatar_url: string | null }
++  to: { user_id: number; username: string; avatar_url: string | null }
++  amount: number
++}
++
++interface SettlementData {
++  balances: { user_id: number; username: string; avatar_url: string | null; balance: number }[]
++  flows: SettlementFlow[]
++}
++
++// ── Helpers ──────────────────────────────────────────────────────────────────
++
++function fmtCurrency(v: number, currency: string, locale: string): string {
++  const decimals = currencyDecimals(currency)
++  const symbol = SYMBOLS[currency] || ''
++  const num = Number(v).toLocaleString(locale, { minimumFractionDigits: decimals, maximumFractionDigits: decimals })
++  return symbol ? `${symbol}${num}` : `${num} ${currency}`
++}
++
++function catColor(cat: string, index: number): string {
++  const meta = COST_CAT_META[cat as keyof typeof COST_CAT_META]
++  if (meta) return meta.color
++  return PIE_COLORS[index % PIE_COLORS.length]
++}
++
++function catLabelKey(cat: string): string {
++  const meta = COST_CAT_META[cat as keyof typeof COST_CAT_META]
++  if (meta) return meta.labelKey
++  return 'costs.cat.other'
++}
++
++// ── Shared UI bits ───────────────────────────────────────────────────────────
++
++const sectionStyle: React.CSSProperties = {
++  background: 'var(--bg-card, #fff)',
++  borderRadius: 16,
++  padding: 20,
++  border: '1px solid var(--border-subtle, rgba(0,0,0,0.08))',
++  boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
++}
++
++function SectionHeader({ icon, title }: { icon: React.ReactNode; title: string }) {
++  return (
++    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
++      <div style={{
++        width: 32, height: 32, borderRadius: 8,
++        background: 'var(--bg-hover, rgba(0,0,0,0.04))',
++        display: 'flex', alignItems: 'center', justifyContent: 'center',
++        color: 'var(--text-secondary, #555)',
++      }}>{icon}</div>
++      <h3 style={{ margin: 0, fontSize: 'var(--fs-h4, 16px)', fontWeight: 600 }}>{title}</h3>
++    </div>
++  )
++}
++
++function StatItem({ label, value }: { label: string; value: string }) {
++  return (
++    <div>
++      <div style={{ fontSize: 'var(--fs-caption, 12px)', color: 'var(--text-faint)', fontWeight: 500 }}>{label}</div>
++      <div style={{ fontSize: 'var(--fs-body, 14px)', fontWeight: 700, marginTop: 2 }}>{value}</div>
++    </div>
++  )
++}
++
++function Avatar({ name, url }: { name: string; url?: string | null }) {
++  if (url) {
++    return <img src={url} alt={name} style={{ width: 32, height: 32, borderRadius: '50%', objectFit: 'cover' }} />
++  }
++  const initial = name?.charAt(0)?.toUpperCase() || '?'
++  return (
++    <div style={{
++      width: 32, height: 32, borderRadius: '50%',
++      background: 'var(--bg-hover, rgba(0,0,0,0.06))',
++      display: 'flex', alignItems: 'center', justifyContent: 'center',
++      fontSize: 14, fontWeight: 600, color: 'var(--text-secondary, #555)',
++    }}>{initial}</div>
++  )
++}
++
++export default function BudgetBoard({ tripId, tripMembers }: { tripId: number | string; tripMembers: TripMember[] }) {
++  const { trip, budgetItems } = useTripStore()
++  const { t, locale } = useTranslation()
++  const currency = trip?.currency || 'EUR'
++  const items = budgetItems || []
++
++  // Empty state
++  if (items.length === 0) {
++    return (
++      <div style={{ padding: 24, maxWidth: 800, margin: '0 auto' }}>
++        <div style={{ ...sectionStyle, textAlign: 'center', padding: 48 }}>
++          <LayoutDashboard size={48} style={{ margin: '0 auto 16px', color: 'var(--text-faint)' }} />
++          <p style={{ fontSize: 'var(--fs-body, 14px)', color: 'var(--text-faint)', margin: 0 }}>
++            {t('budgetBoard.noExpenses')}
++          </p>
++        </div>
++      </div>
++    )
++  }
++
++  return (
++    <div style={{
++      padding: 24, maxWidth: 900, margin: '0 auto',
++      display: 'flex', flexDirection: 'column', gap: 20,
++    }}>
++      {/* Title */}
++      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 4 }}>
++        <LayoutDashboard size={24} />
++        <h2 style={{ margin: 0, fontSize: 'var(--fs-h2, 22px)', fontWeight: 700 }}>{t('budgetBoard.title')}</h2>
++      </div>
++
++      {/* Section 1: Category breakdown with progress bars */}
++      <CategoryBreakdown items={items} currency={currency} locale={locale} t={t} />
++
++      {/* Section 2: Pie chart */}
++      <CategoryPieChart items={items} currency={currency} locale={locale} t={t} />
++
++      {/* Section 3: Daily trend */}
++      <DailyTrend items={items} currency={currency} locale={locale} t={t} />
++
++      {/* Section 4: Member split */}
++      <MemberSplit tripId={tripId} tripMembers={tripMembers} currency={currency} locale={locale} t={t} />
++    </div>
++  )
++}
++
++// ── Section 1: Spending by Category (progress bars) ─────────────────────────
++
++function CategoryBreakdown({ items, currency, locale, t }: {
++  items: BudgetItem[]
++  currency: string
++  locale: string
++  t: (k: string) => string
++}) {
++  const total = items.reduce((s, i) => s + (i.total_price || 0), 0)
++
++  const byCategory = useMemo(() => {
++    const map = new Map<string, { sum: number; count: number }>()
++    for (const item of items) {
++      const cat = item.category || 'other'
++      const existing = map.get(cat) || { sum: 0, count: 0 }
++      existing.sum += item.total_price || 0
++      existing.count += 1
++      map.set(cat, existing)
++    }
++    return Array.from(map.entries())
++      .map(([cat, v]) => ({ cat, ...v }))
++      .sort((a, b) => b.sum - a.sum)
++  }, [items])
++
++  if (byCategory.length === 0) return null
++
++  return (
++    <div style={sectionStyle}>
++      <SectionHeader icon={<TrendingUp size={18} />} title={t('budgetBoard.byCategory')} />
++      <div style={{ marginTop: 16, display: 'flex', flexDirection: 'column', gap: 14 }}>
++        {byCategory.map(({ cat, sum, count }, idx) => {
++          const pct = total > 0 ? (sum / total) * 100 : 0
++          const color = catColor(cat, idx)
++          return (
++            <div key={cat}>
++              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
++                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
++                  <span style={{ width: 10, height: 10, borderRadius: 3, background: color, flexShrink: 0 }} />
++                  <span style={{ fontSize: 'var(--fs-body, 14px)', fontWeight: 500 }}>{t(catLabelKey(cat))}</span>
++                  <span style={{ fontSize: 'var(--fs-caption, 12px)', color: 'var(--text-faint)' }}>
++                    {count} {t('budgetBoard.items')}
++                  </span>
++                </div>
++                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
++                  <span style={{ fontSize: 'var(--fs-body, 14px)', fontWeight: 600 }}>{fmtCurrency(sum, currency, locale)}</span>
++                  <span style={{ fontSize: 'var(--fs-caption, 12px)', color: 'var(--text-faint)' }}>{pct.toFixed(1)}%</span>
++                </div>
++              </div>
++              <div style={{ width: '100%', height: 8, borderRadius: 4, background: 'var(--bg-hover, rgba(0,0,0,0.06))', overflow: 'hidden' }}>
++                <div style={{ width: `${pct}%`, height: '100%', borderRadius: 4, background: color, transition: 'width 0.4s ease' }} />
++              </div>
++            </div>
++          )
++        })}
++      </div>
++      <div style={{ marginTop: 20, paddingTop: 16, borderTop: '1px solid var(--border-subtle, rgba(0,0,0,0.08))', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
++        <span style={{ fontSize: 'var(--fs-body, 14px)', fontWeight: 600, color: 'var(--text-faint)' }}>{t('budgetBoard.grandTotal')}</span>
++        <span style={{ fontSize: 'var(--fs-h3, 20px)', fontWeight: 700, letterSpacing: '-0.02em' }}>{fmtCurrency(total, currency, locale)}</span>
++      </div>
++    </div>
++  )
++}
++
++// ── Section 2: Category Pie Chart (conic-gradient donut) ─────────────────────
++
++function CategoryPieChart({ items, currency, locale, t }: {
++  items: BudgetItem[]
++  currency: string
++  locale: string
++  t: (k: string) => string
++}) {
++  const segments = useMemo(() => {
++    const map = new Map<string, number>()
++    for (const item of items) {
++      const cat = item.category || 'other'
++      map.set(cat, (map.get(cat) || 0) + (item.total_price || 0))
++    }
++    return Array.from(map.entries())
++      .map(([cat, value], idx) => ({ cat, value, color: catColor(cat, idx) }))
++      .filter(s => s.value > 0)
++      .sort((a, b) => b.value - a.value)
++  }, [items])
++
++  const total = segments.reduce((s, x) => s + x.value, 0)
++  if (segments.length === 0) return null
++
++  let cumDeg = 0
++  const stops = segments.map(seg => {
++    const start = cumDeg
++    const deg = (seg.value / total) * 360
++    cumDeg += deg
++    return `${seg.color} ${start}deg ${start + deg}deg`
++  }).join(', ')
++
++  const size = 200
++
++  return (
++    <div style={sectionStyle}>
++      <SectionHeader icon={<Wallet size={18} />} title={t('budgetBoard.byCategory')} />
++      <div style={{ display: 'flex', alignItems: 'center', gap: 24, marginTop: 16, flexWrap: 'wrap' }}>
++        <div style={{ position: 'relative', width: size, height: size, flexShrink: 0 }}>
++          <div style={{ width: size, height: size, borderRadius: '50%', background: `conic-gradient(${stops})`, boxShadow: '0 4px 24px rgba(0,0,0,0.08)' }} />
++          <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', width: size * 0.55, height: size * 0.55, borderRadius: '50%', background: 'var(--bg-card, #fff)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
++            <span style={{ fontSize: 'var(--fs-caption, 12px)', color: 'var(--text-faint)', fontWeight: 500 }}>{t('budgetBoard.totalSpent')}</span>
++            <span style={{ fontSize: 'var(--fs-h3, 20px)', fontWeight: 700, marginTop: 2 }}>{fmtCurrency(total, currency, locale)}</span>
++          </div>
++        </div>
++        <div style={{ flex: 1, minWidth: 180, display: 'flex', flexDirection: 'column', gap: 8 }}>
++          {segments.map(seg => {
++            const pct = (seg.value / total) * 100
++            return (
++              <div key={seg.cat} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
++                <span style={{ width: 12, height: 12, borderRadius: 3, background: seg.color, flexShrink: 0 }} />
++                <span style={{ fontSize: 'var(--fs-body, 14px)', flex: 1 }}>{t(catLabelKey(seg.cat))}</span>
++                <span style={{ fontSize: 'var(--fs-caption, 12px)', color: 'var(--text-faint)', fontWeight: 500 }}>{pct.toFixed(1)}%</span>
++                <span style={{ fontSize: 'var(--fs-body, 14px)', fontWeight: 600, minWidth: 70, textAlign: 'right' }}>{fmtCurrency(seg.value, currency, locale)}</span>
++              </div>
++            )
++          })}
++        </div>
++      </div>
++    </div>
++  )
++}
++
++// ── Section 3: Daily Spending Trend (SVG bar chart) ──────────────────────────
++
++function DailyTrend({ items, currency, locale, t }: {
++  items: BudgetItem[]
++  currency: string
++  locale: string
++  t: (k: string) => string
++}) {
++  const dayGroups = useMemo(() => {
++    const map = new Map<string, number>()
++    const noDateTotal = { val: 0 }
++    for (const item of items) {
++      const date = item.expense_date ? String(item.expense_date).slice(0, 10) : null
++      if (date) {
++        map.set(date, (map.get(date) || 0) + (item.total_price || 0))
++      } else {
++        noDateTotal.val += item.total_price || 0
++      }
++    }
++    const days = Array.from(map.entries()).sort(([a], [b]) => a.localeCompare(b))
++    return { days, noDateTotal: noDateTotal.val, hasNoDate: noDateTotal.val > 0 }
++  }, [items])
++
++  if (dayGroups.days.length === 0 && !dayGroups.hasNoDate) return null
++
++  const allBars: [string, number][] = [...dayGroups.days]
++  if (dayGroups.hasNoDate) allBars.push([t('budgetBoard.noDate'), dayGroups.noDateTotal])
++
++  const maxVal = Math.max(...allBars.map(([, v]) => v), 1)
++  const barWidth = 40
++  const barGap = 16
++  const chartHeight = 160
++  const labelHeight = 30
++  const totalWidth = allBars.length * (barWidth + barGap) + barGap
++  const total = allBars.reduce((s, [, v]) => s + v, 0)
++  const avg = allBars.length > 0 ? total / allBars.length : 0
++  const peakIdx = allBars.reduce((best, [, v], i) => v > allBars[best][1] ? i : best, 0)
++
++  const fmtDate = (d: string) => {
++    if (d === t('budgetBoard.noDate')) return d
++    const parts = d.split('-')
++    return parts.length >= 3 ? `${parts[1]}-${parts[2]}` : d
++  }
++
++  return (
++    <div style={sectionStyle}>
++      <SectionHeader icon={<TrendingUp size={18} />} title={t('budgetBoard.dailyTrend')} />
++      <div style={{ display: 'flex', gap: 24, marginTop: 12, marginBottom: 16, flexWrap: 'wrap' }}>
++        <StatItem label={t('budgetBoard.grandTotal')} value={fmtCurrency(total, currency, locale)} />
++        <StatItem label={t('budgetBoard.dailyAvg')} value={fmtCurrency(avg, currency, locale)} />
++        <StatItem label={t('budgetBoard.peakDay')} value={fmtCurrency(allBars[peakIdx]?.[1] || 0, currency, locale)} />
++      </div>
++      <svg width={totalWidth} height={chartHeight + labelHeight} style={{ overflow: 'visible' }}>
++        {[0, 0.25, 0.5, 0.75, 1].map(ratio => {
++          const y = chartHeight - ratio * chartHeight + 4
++          return <line key={ratio} x1={0} y1={y} x2={totalWidth} y2={y} stroke="var(--border-subtle, rgba(0,0,0,0.06))" strokeWidth={1} />
++        })}
++        {allBars.map(([date, val], idx) => {
++          const x = barGap + idx * (barWidth + barGap)
++          const h = (val / maxVal) * chartHeight
++          const y = chartHeight - h + 4
++          const isPeak = idx === peakIdx
++          return (
++            <g key={date + idx}>
++              <rect x={x} y={y} width={barWidth} height={h} rx={4} fill={isPeak ? '#6366f1' : '#94a3b8'} opacity={isPeak ? 1 : 0.7} />
++              <text x={x + barWidth / 2} y={y - 6} textAnchor="middle" fontSize={11} fill="var(--text-secondary, #555)" fontWeight={isPeak ? 600 : 400}>
++                {fmtCurrency(val, currency, locale)}
++              </text>
++              <text x={x + barWidth / 2} y={chartHeight + 20} textAnchor="middle" fontSize={11} fill="var(--text-faint, #999)">
++                {fmtDate(date)}
++              </text>
++            </g>
++          )
++        })}
++      </svg>
++    </div>
++  )
++}
++
++// ── Section 4: Member Split & Settlement ─────────────────────────────────────
++
++function MemberSplit({ tripId, tripMembers, currency, locale, t }: {
++  tripId: number | string
++  tripMembers: TripMember[]
++  currency: string
++  locale: string
++  t: (k: string) => string
++}) {
++  const [summary, setSummary] = useState<PerPersonSummary[]>([])
++  const [settlement, setSettlement] = useState<SettlementData | null>(null)
++  const hasMultipleMembers = tripMembers.length > 1
++
++  useEffect(() => {
++    if (!hasMultipleMembers) return
++    budgetApi.perPersonSummary(tripId).then((data: unknown) => {
++      const arr = Array.isArray(data) ? data : (data as { members?: PerPersonSummary[] })?.members || []
++      setSummary(arr)
++    }).catch(() => {})
++    budgetApi.settlement(tripId).then((data: unknown) => setSettlement(data as SettlementData)).catch(() => {})
++  }, [tripId, hasMultipleMembers])
++
++  if (!hasMultipleMembers) {
++    return (
++      <div style={sectionStyle}>
++        <SectionHeader icon={<Users size={18} />} title={t('budgetBoard.memberSplit')} />
++        <p style={{ marginTop: 16, fontSize: 'var(--fs-body, 14px)', color: 'var(--text-faint)', margin: 0 }}>
++          {t('budgetBoard.noMembers')}
++        </p>
++      </div>
++    )
++  }
++
++  return (
++    <div style={sectionStyle}>
++      <SectionHeader icon={<Users size={18} />} title={t('budgetBoard.memberSplit')} />
++
++      {/* Per-person summary */}
++      {summary.length > 0 && (
++        <div style={{ marginTop: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
++          {summary.map(person => (
++            <div key={person.user_id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', borderRadius: 12, background: 'var(--bg-hover, rgba(0,0,0,0.03))' }}>
++              <Avatar name={person.username} url={person.avatar_url} />
++              <div style={{ flex: 1, minWidth: 0 }}>
++                <div style={{ fontSize: 'var(--fs-body, 14px)', fontWeight: 600 }}>{person.username}</div>
++                <div style={{ fontSize: 'var(--fs-caption, 12px)', color: 'var(--text-faint)' }}>
++                  {t('budgetBoard.spent')}: {fmtCurrency(person.paid, currency, locale)} · {t('budgetBoard.perPerson')}: {fmtCurrency(person.share, currency, locale)}
++                </div>
++              </div>
++              <div style={{ textAlign: 'right' }}>
++                <div style={{ fontSize: 'var(--fs-caption, 12px)', color: 'var(--text-faint)' }}>{t('budgetBoard.balance')}</div>
++                <div style={{ fontSize: 'var(--fs-body, 14px)', fontWeight: 700, color: person.balance >= 0 ? '#16a34a' : '#dc2626' }}>
++                  {fmtCurrency(person.balance, currency, locale)}
++                </div>
++              </div>
++            </div>
++          ))}
++        </div>
++      )}
++
++      {/* Settlement flows */}
++      {settlement && settlement.flows && settlement.flows.length > 0 && (
++        <div style={{ marginTop: 20, paddingTop: 16, borderTop: '1px solid var(--border-subtle, rgba(0,0,0,0.08))' }}>
++          <div style={{ fontSize: 'var(--fs-body, 14px)', fontWeight: 600, marginBottom: 12 }}>{t('budgetBoard.memberSplit')}</div>
++          {settlement.flows.map((flow, idx) => (
++            <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
++              <Avatar name={flow.from.username} url={flow.from.avatar_url} />
++              <span style={{ fontSize: 'var(--fs-body, 14px)' }}>{flow.from.username}</span>
++              <span style={{ fontSize: 'var(--fs-caption, 12px)', color: 'var(--text-faint)' }}>{t('budgetBoard.owes')}</span>
++              <span style={{ fontSize: 'var(--fs-body, 14px)', fontWeight: 600, color: '#dc2626' }}>{fmtCurrency(flow.amount, currency, locale)}</span>
++              <span style={{ fontSize: 'var(--fs-caption, 12px)', color: 'var(--text-faint)' }}>{t('budgetBoard.to')}</span>
++              <Avatar name={flow.to.username} url={flow.to.avatar_url} />
++              <span style={{ fontSize: 'var(--fs-body, 14px)' }}>{flow.to.username}</span>
++            </div>
++          ))}
++        </div>
++      )}
++
++      {/* Settled up */}
++      {settlement && (!settlement.flows || settlement.flows.length === 0) && (
++        <div style={{ marginTop: 20, paddingTop: 16, borderTop: '1px solid var(--border-subtle, rgba(0,0,0,0.08))', textAlign: 'center' }}>
++          <p style={{ fontSize: 'var(--fs-body, 14px)', color: 'var(--text-faint)', margin: 0 }}>{t('budgetBoard.settled')}</p>
++        </div>
++      )}
++    </div>
++  )
++}
